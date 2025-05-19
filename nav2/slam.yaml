@@ -1,0 +1,12 @@
+slam_toolbox:
+  ros__parameters:
+    use_sim_time: false
+    publish_period_sec: 2.0
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_link
+    max_laser_range: 15.0
+    min_laser_range: 0.5
+    sensor_max_range: 10.0
+    grid_size: 0.05  # Float value for grid resolution
+    resolution: 0.05  # Float for map resolution
