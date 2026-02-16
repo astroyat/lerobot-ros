@@ -2,164 +2,198 @@
 
 ROS 2 bridge for [LeRobot](https://github.com/huggingface/lerobot) — enabling seamless control of [LeRobot’s mobile base, arm, and sensors](https://github.com/astroyat/lerobot-ros/blob/main/media/lidar.jpg) within the ROS 2 ecosystem.
 
-## 🧭 Overview
-
-lerobot-ros connects LeRobot hardware to ROS 2.  
-It provides a standard ROS 2 interface for teleoperation, odometry, and (soon) arm control.  
-The package supports both Raspberry Pi 5 (on-board control) and desktop PCs (remote or simulation setups).
-
-### ✨ Features
-
-- ✅ Teleoperate LeRobot **mobile base** using `/cmd_vel`
-- ✅ Stream and visualize **LIDAR** data
-- ✅ Integrate **rf2o_laser_odometry** for SLAM or navigation
-- 🚧 **Arm teleoperation** (in development)
-- ⚙️ ROS 2 Humble (22.04) and Jazzy (24.04) supported
-
-## 🧩 Architecture
+## 🧭 Architecture Overview
 
 ```text
-+-----------------------------+
-|        ROS 2 System         |
-|-----------------------------|
-| /cmd_vel   → Base Driver    |
-| /odom      ← Odometry       |
-| /scan      ← LIDAR Driver   |
-| /tf        ↔ Transform Tree |
-| /arm/*     ↔ Arm (WIP)      |
-+-----------------------------+
-            │
-            ↓
-     LeRobot Hardware
- (Mobile Base + Arm + Sensors)
+[ Workstation (PC: kabybot) ]                       [ LeKiwi Robot (pirobot.local: 10.0.0.71) ]
+ ├── ros2operate.py                                  ├── robot.launch.py
+ │    ├─ Subscribes to /cmd_vel (Twist)              │    ├─ LeKiwi Motor Host Daemon (ZMQ: 5555 / 5556)
+ │    ├─ Streams Front & Wrist Feeds (OpenCV)        │    ├─ RPLiDAR A1 Driver (/scan on /dev/ttyUSB1)
+ │    └─ Bridges Actions to LeKiwi Base via ZMQ      │    ├─ Static TF (base_link -> laser_frame)
+ ├── bringup.launch.py (mode:=slam or mode:=nav)    │    └─ Laser Odometry (rf2o -> /odom)
+ └── RViz2 (Map & Sensor Visualization)
 ```
 
-## 🛠️ Installation
+`lerobot_ros` connects LeRobot hardware to ROS 2. It integrates:
+- **LIDAR**: `sllidar_ros2` (RPLiDAR A1 on `/dev/ttyUSB1`)
+- **Odometry**: `rf2o_laser_odometry`
+- **SLAM**: `slam_toolbox`
+- **Navigation**: `nav2`
+- **Teleoperation**: Direct OpenCV keyboard, `teleop_twist_keyboard`, or Xbox gamepad (`teleop_twist_joy`)
 
-### 🐧 Raspberry Pi 5 Setup
-#### 1. Install <a href="https://ubuntu.com/download/raspberry-pi">Ubuntu Server 24.04.2 LTS (64-bit)</a>, setup wireless LAN and enable SSH in the rpi-imager, do not select Raspberry Pi OS as this requires running ROS 2 in docker.
-#### 2. Install <a href="https://docs.ros.org/en/jazzy/Installation.html">ROS 2 Jazzy</a>.
-#### 3. Install <a href="https://github.com/Slamtec/sllidar_ros2">SLAMTEC LIDAR ROS 2</a> or other LIDAR ROS 2 package depending on the LIDAR connected to the Raspberry Pi 5.
+### 🖨️ 3D Printed Hardware Mounts
+The rear LIDAR mount files for LeKiwi are provided in [`stl/`](stl/):
+- [`back_mount1.stl`](stl/back_mount1.stl)
+- [`back_mount2.stl`](stl/back_mount2.stl)
+- [`back_mount3.stl`](stl/back_mount3.stl)
+
+See [media/back.jpg](media/back.jpg) and [media/lidar.jpg](media/lidar.jpg) for reference assembly photos.
+
+---
+
+## 🛠️ Installation & Setup
+
+### 1. Operating System & Prerequisites
+- **Robot (Raspberry Pi 5)**: Ubuntu Server 24.04 LTS (64-bit) with **ROS 2 Jazzy**.
+- **Workstation / PC**: Ubuntu 24.04 LTS with **ROS 2 Jazzy**.
+- **LeRobot (ROS 2 branch)**: Clone and checkout the `ros2-latest` branch containing ROS 2 teleoperation and motor driver support:
+  ```bash
+  cd ~/lerobot
+  git checkout ros2-latest
+  ```
+
+#### 💡 Conda C++ Library Path Workaround
+If running Python scripts within a Conda environment and encountering `libstdc++.so.6` or GLIBCXX symbol mismatch errors with ROS 2 Python packages:
 ```bash
+export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+```
+
+### 2. Build the Workspace
+Run this on both the robot and the workstation:
+
+```bash
+# Source ROS 2 system underlay
+source /opt/ros/jazzy/setup.bash
+
+# Create workspace and import dependencies
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
-git clone https://github.com/Slamtec/sllidar_ros2.git
-cd ~/ros2_ws/
-source /opt/ros/jazzy/setup.bash
+git clone https://github.com/astroyat/lerobot-ros.git
+vcs import < lerobot-ros/lerobot_ros.repos
+
+# Build package
+cd ~/ros2_ws
 colcon build --symlink-install
+
+# Source the workspace overlay
+source install/setup.bash
 ```
-#### 4. Modify the USB port (/dev/ttyUSBX) connected to the LIDAR in the sllidar_ros2 launch files (sllidar_a1_launch.py, view_sllidar_a1_launch.py).
-#### 5. From the PC, run xhost +, ssh -X to the Raspberry Pi 5 and run the sllidar node to view the laser scan in <a href="media/scan.png">rviz2</a>.
+
+---
+
+## 🚀 Usage Guide
+
+### 1. On LeKiwi Robot (`pirobot.local` / `10.0.0.71`)
+
+SSH into the robot and launch all consolidated onboard services (Motor Host Daemon + RPLiDAR A1 + Static TF + Laser Odometry):
+
 ```bash
+# 1. SSH into LeKiwi
+ssh target@10.0.0.71
+
+# 2. Source ROS 2 environment
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+# 3. Launch robot stack
+ros2 launch lerobot_ros robot.launch.py serial_port:=/dev/ttyUSB1
+```
+
+*(Alternatively, run components individually: in terminal 1, run `cd ~/lerobot && ./examples/lekiwi/lekiwi_host.sh`; in terminal 2, run `source /opt/ros/jazzy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch lerobot_ros lidar.launch.py serial_port:=/dev/ttyUSB1`).*
+
+*(Optional: Inspect the LiDAR scan directly on the Pi via SSH X11 forwarding:)*
+```bash
+# On Workstation:
+xhost +
+ssh -X target@10.0.0.71
+
+# On Pi:
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch sllidar_ros2 view_sllidar_a1_launch.py
 ```
-#### 6. Install LeRobot on Raspberry Pi 5.
-#### 7. Fetch the <a href="https://github.com/astroyat/lerobot/tree/ros2-latest">ROS 2 changes</a>.
-```bash
-cd ~/lerobot
-git checkout ros2-latest
-```
 
-### 💻 PC Setup
-#### 1. Install <a href="https://docs.ros.org/en/humble/Installation.html">ROS 2 Humble</a> on Ubuntu 22.04.5 LTS on PC (other ROS 2 and Ubuntu do not work with LeRobot due to RCL Python dependency).
-#### 2. Install <a href="https://github.com/MAPIRlab/rf2o_laser_odometry">rf2o_laser_odometry</a>.
-```bash
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws/src
-git clone https://github.com/MAPIRlab/rf2o_laser_odometry.git
-cd ~/ros2_ws/
-source /opt/ros/humble/setup.bash
-colcon build --symlink-install
-```
-#### 3. Modify the odom_topic in the rf2o_laser_odometry launch file (rf2o_laser_odometry.launch.py) from odom_rf2o to odom.
-#### 4. Install LeRobot on PC.
-#### 5. Fetch the <a href="https://github.com/astroyat/lerobot/tree/ros2-latest">ROS 2 changes</a>.
-```bash
-cd ~/lerobot
-git checkout ros2-latest
-```
+---
 
-## 🚀 Usage
-### 🕹️ Teleoperate the Mobile Base using ROS 2 /cmd_vel
-#### 1. On the Raspberry Pi 5, run the LeRobot remote
-```bash
-cd ~/lerobot
-python3 -m src.lerobot.robots.lekiwi.lekiwi_host
-```
-#### 2. On the PC, run the LeRobot teleop
-```bash
-export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
-export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-cd ~/lerobot
-python3 ~/lerobot/examples/lekiwi/ros2operate.py
-```
-#### 3. On the PC, run the ROS 2 teleop using keyboard
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
-```
-#### 4. Alternatively, run the ROS 2 teleop using xbox joystick
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run joy joy_node &
-ros2 launch teleop_twist_joy teleop-launch.py joy_config:='xbox'
-```
+### 2. On Workstation (`kabybot`)
 
-### 🕹️ Teleoperate the Mobile Base using ROS 2 NAV2 /cmd_vel
-#### 1. On the Raspberry Pi 5, run the LeRobot remote
-```bash
-cd ~/lerobot
-python3 -m src.lerobot.robots.lekiwi.lekiwi_host
-```
-#### 2. On the PC, run the LeRobot teleop
-```bash
-export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
-export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-cd ~/lerobot
-python3 ~/lerobot/examples/lekiwi/ros2operate.py
-```
-#### 3. On the Raspberry Pi 5, run the sllidar node in scan mode to publish the laser scan
+#### Step A: Teleoperation & Motor Bridge (`ros2operate.py`)
+Run `ros2operate.py` to bridge ROS 2 `/cmd_vel` to LeKiwi's motors and view live camera streams:
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch sllidar_ros2 sllidar_a1_launch.py
+
+cd ~/lerobot
+git checkout ros2-latest
+python examples/lekiwi/ros2operate.py
 ```
-#### 4. On the PC, confirm the scan topic is published
+
+##### Driving Controls:
+- **Direct Keyboard in Camera Window**: Click either OpenCV camera window (`front` or `wrist`) and drive directly:
+  - `W` / `S`: Forward / backward
+  - `A` / `D`: Strafe left / right
+  - `Z` / `X`: Turn counter-clockwise / clockwise
+  - `R` / `F`: Increase / decrease speed level
+- **ROS 2 Keyboard Node**: In a separate terminal:
+  ```bash
+  source /opt/ros/jazzy/setup.bash
+  source ~/ros2_ws/install/setup.bash
+  ros2 run teleop_twist_keyboard teleop_twist_keyboard
+  ```
+- **Xbox Gamepad / Joystick**:
+  ```bash
+  source /opt/ros/jazzy/setup.bash
+  source ~/ros2_ws/install/setup.bash
+  ros2 run joy joy_node &
+  ros2 launch teleop_twist_joy teleop-launch.py joy_config:='xbox'
+  ```
+
+---
+
+#### Step B: SLAM & Navigation Bringup
+In a separate terminal on the workstation, launch SLAM mapping or autonomous navigation (listening to `/scan`, `/odom`, and TF broadcasted by `robot.launch.py`):
+
 ```bash
-ros2 topic echo /scan --no-arr
-```
-#### 5. On the PC, run the rf2o_laser_odometry node to publish the odom
-```bash
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
-ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py
+
+# Option 1: SLAM Mapping Mode (SLAM Toolbox)
+ros2 launch lerobot_ros bringup.launch.py mode:=slam
+
+# Option 2: Autonomous Navigation Mode (Nav2 Stack)
+ros2 launch lerobot_ros bringup.launch.py mode:=nav
+
+# Option 3: Odometry & TF Only (if robot.launch.py was started without local odometry)
+ros2 launch lerobot_ros bringup.launch.py mode:=idle launch_odom:=true launch_tf:=true
 ```
-#### 6. Confirm the odom topic is published
+
+*(Note: If the RPLiDAR is connected directly to the workstation instead of the Pi, add `launch_lidar:=true` to automatically start local LiDAR, TF, and laser odometry).*
+
+---
+
+#### Step C: Visualization (RViz2)
+Open RViz2 to visualize map, scans, robot pose, and dispatch Nav2 goals:
+
 ```bash
-ros2 topic echo /odom --no-arr
-```
-#### 7. On the PC, run the ROS 2 transform
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run tf2_ros static_transform_publisher -0.1 0 0.3 0 0 0 base_link laser
-```
-#### 8. On the PC, run the ROS 2 SLAM using <a href="nav2/slam.yaml">slam.yaml</a> to publish the map
-```bash
-source /opt/ros/humble/setup.bash
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false slam_params_file:=slam.yaml
-```
-#### 9. Confirm the map topic is published
-```bash
-ros2 topic echo /map --no-arr
-```
-#### 10. On the PC, run the ROS 2 NAV2 using <a href="nav2/nav2.yaml">nav2.yaml</a>
-```bash
-source /opt/ros/humble/setup.bash
-ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false params_file:=nav2.yaml
-```
-#### 11. On the PC, run rviz2 to view the <a href="media/map.png">map</a> and set the goal post, refer to various ROS 2 NAV2 tutorial.
-```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
 rviz2
+```
+
+> [!IMPORTANT]
+> In RViz2, set the `/map` display **Durability Policy** to **`Transient Local`** to properly display the SLAM occupancy grid map.
+
+---
+
+## 🔍 Topic Diagnostics & Verification
+
+Verify inter-node and network topic communications:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+# Check LiDAR laser scan stream
+ros2 topic echo /scan --no-arr
+
+# Check 2D laser odometry
+ros2 topic echo /odom --no-arr
+
+# Check SLAM occupancy grid map
+ros2 topic echo /map --no-arr
+
+# Check velocity teleop commands
+ros2 topic echo /cmd_vel
 ```

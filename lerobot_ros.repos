@@ -1,0 +1,9 @@
+repositories:
+  sllidar_ros2:
+    type: git
+    url: https://github.com/Slamtec/sllidar_ros2.git
+    version: main
+  rf2o_laser_odometry:
+    type: git
+    url: https://github.com/MAPIRlab/rf2o_laser_odometry.git
+    version: master

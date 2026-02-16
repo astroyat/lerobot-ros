@@ -28,7 +28,6 @@ controller_server:
     controller_plugins: ["FollowPath"]
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      height: 3.0  # Ensure it is a float value
 
 planner_server:
   ros__parameters:
@@ -36,7 +35,6 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
-      height: 3.0  # Ensure it is a float value
 
 bt_navigator:
   ros__parameters:
@@ -60,8 +58,18 @@ local_costmap:
     plugins: ["obstacle_layer", "inflation_layer"]
     obstacle_layer:
       plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        max_obstacle_height: 2.0
+        clearing: true
+        marking: true
+        data_type: "LaserScan"
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
+      cost_scaling_factor: 3.0
+      inflation_radius: 0.55
 
 global_costmap:
   ros__parameters:
@@ -77,5 +85,15 @@ global_costmap:
     plugins: ["obstacle_layer", "inflation_layer"]
     obstacle_layer:
       plugin: "nav2_costmap_2d::ObstacleLayer"
+      enabled: true
+      observation_sources: scan
+      scan:
+        topic: /scan
+        max_obstacle_height: 2.0
+        clearing: true
+        marking: true
+        data_type: "LaserScan"
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
+      cost_scaling_factor: 3.0
+      inflation_radius: 0.55
