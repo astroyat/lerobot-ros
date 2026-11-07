@@ -1,9 +1,11 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
 
 def generate_launch_description():
     pkg_share = FindPackageShare('lerobot_ros')
@@ -23,23 +25,23 @@ def generate_launch_description():
     declare_mode = DeclareLaunchArgument(
         'mode',
         default_value='slam',
-        description='Operation mode: "slam", "nav", or "idle" (just sensors)')
+        description='Operation mode: "slam" (mapping), "nav" (navigation), or "idle" (sensors and odom only)')
+
+    serial_port = LaunchConfiguration('serial_port')
+    declare_serial_port = DeclareLaunchArgument(
+        'serial_port',
+        default_value='/dev/ttyUSB1',
+        description='Serial port for RPLiDAR (e.g. /dev/ttyUSB1 if motor bus is on /dev/ttyUSB0)')
 
     # LIDAR
-    # Note: sllidar config is hardcoded in the original instructions, 
-    # but we should attempt to invoke the standard launch if possible.
-    # The README said: ros2 launch sllidar_ros2 sllidar_a1_launch.py
     sllidar_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([sllidar_pkg, 'launch', 'sllidar_a1_launch.py'])
-        )
+        ),
+        launch_arguments={'serial_port': serial_port}.items()
     )
 
     # Odometry
-    # The README said: ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py
-    # But also required modifying odom_topic to /odom. 
-    # We can try to remap or pass params if the launch file supports it, 
-    # but rf2o launch might be rigid. We'll use Node directly to be safe and cleaner.
     rf2o_node = Node(
         package='rf2o_laser_odometry',
         executable='rf2o_laser_odometry_node',
@@ -56,17 +58,25 @@ def generate_launch_description():
         }],
     )
 
-    # TF
-    # static_transform_publisher -0.1 0 0.3 0 0 0 base_link laser
+    # TF (base_link -> laser)
     tf_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments = ['-0.1', '0', '0.3', '0', '0', '0', 'base_link', 'laser'],
-        output='screen'
+        name='static_tf_pub_laser',
+        arguments=[
+            '--x', '-0.1',
+            '--y', '0.0',
+            '--z', '0.3',
+            '--yaw', '0.0',
+            '--pitch', '0.0',
+            '--roll', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'laser',
+        ],
+        output='screen',
     )
 
-    # SLAM
-    # config: config/slam.yaml
+    # SLAM Toolbox (mode:=slam)
     slam_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([slam_pkg, 'launch', 'online_async_launch.py'])
@@ -74,11 +84,11 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': use_sim_time,
             'slam_params_file': PathJoinSubstitution([pkg_share, 'config', 'slam.yaml'])
-        }.items()
+        }.items(),
+        condition=IfCondition(PythonExpression(["'", mode, "' == 'slam'"]))
     )
 
-    # Navigation
-    # config: config/nav2.yaml
+    # Navigation Nav2 (mode:=nav)
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([nav2_pkg, 'launch', 'navigation_launch.py'])
@@ -86,22 +96,21 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': use_sim_time,
             'params_file': PathJoinSubstitution([pkg_share, 'config', 'nav2.yaml'])
-        }.items()
+        }.items(),
+        condition=IfCondition(PythonExpression(["'", mode, "' == 'nav'"]))
     )
 
     return LaunchDescription([
         declare_use_sim_time,
         declare_mode,
-        
+        declare_serial_port,
+
         # Always run sensors and TF
         sllidar_launch,
         rf2o_node,
         tf_node,
 
-        # Conditional SLAM or Nav2 would be ideal, but for now let's just expose them via comments
-        # or simple inclusion. 
-        # The user's original workflow had them in separate steps.
-        # Let's include SLAM by default as it's the primary mapping mode.
-        slam_launch
-        # nav2_launch # Uncomment to run nav2
+        # Conditional SLAM or Nav2
+        slam_launch,
+        nav2_launch,
     ])

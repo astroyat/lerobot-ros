@@ -20,10 +20,7 @@ Ensure you have ROS 2 installed (Humble or Jazzy).
 mkdir -p ~/ros2_ws/src
 cd ~/ros2_ws/src
 git clone https://github.com/astroyat/lerobot-ros.git
-vcs import < lerobot-ros/lerobot_ros.repos # (Optional: if we add a .repos file later)
-# For now, manually clone dependencies if not installed via apt
-git clone https://github.com/Slamtec/sllidar_ros2.git
-git clone https://github.com/MAPIRlab/rf2o_laser_odometry.git
+vcs import < lerobot-ros/lerobot_ros.repos
 
 cd ~/ros2_ws
 colcon build --symlink-install
@@ -32,31 +29,32 @@ source install/setup.bash
 
 ## 🚀 Usage
 
-### 🟢 Bringup (LIDAR + Odom + TF + SLAM)
-Launch everything with a single command:
+### 🟢 Bringup
+
+Launch all required nodes with a single command:
+
+#### 1. Mapping Mode (LIDAR + Odometry + TF + SLAM)
 ```bash
-ros2 launch lerobot_ros bringup.launch.py
+ros2 launch lerobot_ros bringup.launch.py mode:=slam
+```
+*(By default `serial_port:=/dev/ttyUSB1`. If your LiDAR is on another port, add `serial_port:=/dev/ttyUSB0`)*
+
+#### 2. Navigation Mode (LIDAR + Odometry + TF + Nav2)
+```bash
+ros2 launch lerobot_ros bringup.launch.py mode:=nav
 ```
 
-This will:
-1. Start the LIDAR driver.
-2. Publish odometry using laser scans (`rf2o`).
-3. Publish the static transform (`base_link` -> `laser`).
-4. Start SLAM Toolbox for mapping and localization.
+#### 3. Sensors & Odometry Only
+```bash
+ros2 launch lerobot_ros bringup.launch.py mode:=idle
+```
 
 ### 🕹️ Teleoperation
-To control the robot, run the teleop node in a separate terminal:
+To drive the robot manually via ROS 2:
 ```bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
-
-### 🗺️ Navigation (Nav2)
-To use the Navigation stack (path planning):
-*(Note: requires SLAM or a map to be running)*
-
-```bash
-ros2 launch nav2_bringup navigation_launch.py params_file:=$(ros2 pkg prefix lerobot_ros)/share/lerobot_ros/config/nav2.yaml
-```
+Make sure `ros2operate.py` or `LeKiwiClient` is running on the client side to receive `/cmd_vel` and forward motor commands to LeKiwi.
 
 ## 🧩 Architecture
 
